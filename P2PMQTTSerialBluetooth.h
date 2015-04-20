@@ -4,8 +4,8 @@
  * (c) D. Cuartielles & A. Goransson, Malmo University, K3 School of Arts
  */
 
-#ifndef CustomP2PMQTT_h
-#define CustomP2PMQTT_h
+#ifndef P2PMQTTSerialBluetooth_h
+#define P2PMQTTSerialBluetooth_h
 
 #include <SoftwareSerial.h>
 #include <Arduino.h>
@@ -77,6 +77,10 @@
 // RX 
 #define RX_PIN 10
 #define TX_PIN 11
+
+// LIMITS
+#define TOPIC_LIMIT 2
+#define PAYLOAD_LIMIT 10
 
   // structures needed to compose each type of message
   // P2PMQTT CONNECT package
@@ -201,16 +205,22 @@ class P2PMQTT : public Stream {
   // Constructor
   P2PMQTT(bool debug = false);
 
-  // methods
-  // bool begin(const char* model = "default");
-  // bool begin(   const char *manufacturer, const char *model, const char *description,
-  //               const char *version, const char *uri, const char *serial );
   void begin (long baudRate);
 
   int connect(byte, long);
   int subscribe(P2PMQTTsubscribe);
+
   int publish(P2PMQTTpublish pub);
-    // bool isConnected(void);
+
+  int publishInt(char topic[], int payload);
+  int publishLong(char topic[], long payload);
+  int publishFloat(char topic[], float payload);
+  int publishChar(char topic[], char payload);
+  int publishString(char topic[], char payload[]);
+
+  int parseString(byte payload[]);
+
+    bool isConnected(void);
     virtual size_t write(uint8_t *buff, size_t len);
 
     virtual int available(void);
@@ -221,6 +231,8 @@ class P2PMQTT : public Stream {
     virtual size_t write(uint8_t);
 
     using Print::write; // pull in write(str) and write(buf, size) from Print
+
+    void sendConnectionAck();
 
     int getType(byte* buffer);
     byte* getMsgPublishField(byte* buffer, int field);

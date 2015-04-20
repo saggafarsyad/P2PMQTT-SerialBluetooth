@@ -4,20 +4,19 @@
  * (c) D. Cuartielles & A. Goransson, Malmo University, K3 School of Arts
  */
 
-#include "CustomP2PMQTT.h"
+#include "P2PMQTTSerialBluetooth.h"
 
 // Accessory descriptor. It's how Arduino identifies itself to Android.
 char applicationName[] = "default"; // the app on your phone
-char accessoryName[] = "wrox_aoa_accessory"; // your Arduino board
-char companyName[] = "Wiley";
+char accessoryName[] = "arduino_accessory"; // your Arduino board
+char companyName[] = "area54labs";
 
 char versionNumber[] = "1.0";
 char serialNumber[] = "1";
-char url[] = "http://media.wiley.com"; // this will have to be corrected
+char url[] = "http://area54labs.net"; // this will have to be corrected
 
   // Initialize the accessory.
-// AndroidAccessory usb(companyName, applicationName, accessoryName, versionNumber, url, serialNumber);
-SoftwareSerial usb(10,11);
+SoftwareSerial btSerial(10,11);
 
 // constructor
 P2PMQTT::P2PMQTT(bool debug)
@@ -31,48 +30,38 @@ P2PMQTT::P2PMQTT(bool debug)
 }
 
 void P2PMQTT::begin(long baudRate) {
-  usb.begin(baudRate);
+  btSerial.begin(baudRate);
 }
 
-// bool P2PMQTT::begin(const char* model) {`
-//   usb.model = model;
-//   return usb.begin();
-// }
-
-// bool begin(   const char *manufacturer, const char *model, const char *description,
-//               const char *version, const char *uri, const char *serial ) {
-//   usb.manufacturer = manufacturer;
-//   usb.model = model;
-//   usb.description = description;
-//   usb.version = version;
-//   usb.uri = uri;
-//   usb.serial = serial;
-//   return usb.begin();
-// }
-
-// bool P2PMQTT::isConnected() {
-//   return usb.isConnected();
-// }
+bool P2PMQTT::isConnected() {
+  // @todo: build isConnected function
+  return true;  
+}
 
 int P2PMQTT::available() {
-  return usb.available();
+  return btSerial.available();
 }
 
 int P2PMQTT::read() {
-  return usb.read();
+  return btSerial.read();
 }
 
 int P2PMQTT::peek() {
-  return usb.peek();
+  return btSerial.peek();
 }
 
 size_t P2PMQTT::write(uint8_t *buff, size_t len)
 {
-    return usb.write(buff, len);
+    return btSerial.write(buff, len);
 }
 
 size_t P2PMQTT::write(uint8_t c) {
-  return usb.write(&c, 1);
+  return btSerial.write(&c, 1);
+}
+
+void P2PMQTT::sendConnectionAck() {
+  byte msg[4] = {32,2,0,0};
+  btSerial.write(msg, 4);
 }
 
 void P2PMQTT::flush() {
@@ -90,21 +79,74 @@ int P2PMQTT::connect(byte flagsCONNECT, long _keepAliveTimer) {
 }
 
 int P2PMQTT::subscribe(P2PMQTTsubscribe P2PMQTTSubs) {
-//    usb.write(&P2PMQTTSubs, sizeof(P2PMQTTSubs));
+//    btSerial.write(&P2PMQTTSubs, sizeof(P2PMQTTSubs));
   return 0;  
 }
 
 int P2PMQTT::publish(P2PMQTTpublish pub) {
-  byte msg[] = {0, 0, 0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 };
-  msg[0] = pub.fixedHeader;
-  msg[1] = pub.length;
-  msg[2] = pub.lengthTopicMSB;
-  msg[3] = pub.lengthTopicLSB;
-  msg[4] = pub.topic[0];
-  msg[5] = pub.topic[1];
-  msg[6] = pub.payload[0];
-  usb.write(msg, 7);
-  return 0;  
+  if (pub.length <= 16) {  
+    int index = 0;
+
+    byte msg[] = {0, 0, 0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0 ,0, 0, 0};
+    msg[index] = pub.fixedHeader; index++;
+    msg[index] = pub.length; index++;
+    msg[index] = pub.lengthTopicMSB; index++;
+    msg[index] = pub.lengthTopicLSB; index++;
+    
+    // Write topic to buffer
+    for (int i = 0; i < pub.lengthTopicLSB; i++) {
+      msg[index] = pub.topic[i];
+      index++;
+    }
+
+    // Write payload to buffer
+    for (int i = 0; i < (pub.length - pub.lengthTopicLSB); i++) {
+      msg[index] = pub.payload[i];
+      index++;
+    }
+
+    btSerial.write(msg, pub.length + 2);
+
+    return 0;
+    // if (debug) {     
+    //   Serial.print("Length: ");
+    //   Serial.println(pub.length);
+
+    //   for (int i = 0; i < pub.length + 2; i++) {
+    //     Serial.println(msg[i]);
+    //   }    
+      
+    //   Serial.println("***************");
+    // }
+  }
+
+  return -1;    
+}
+
+int P2PMQTT::publishInt(char topicName[], int payload) {
+  int topicLength = sizeof(topicName);
+
+  if (topicLength <= TOPIC_LIMIT) {          
+    // Convert int to byte   
+    byte tmp[2] = {
+      payload & 0xFF,
+      (payload >> 8) & 0xFF
+    }; 
+
+    int payloadLength = sizeof(tmp);
+    
+    // Build pub Message
+    P2PMQTTpublish pub;
+    pub.fixedHeader = 48;
+    pub.length = topicLength + payloadLength + 2;
+    pub.lengthTopicMSB = 0;
+    pub.lengthTopicLSB = topicLength;
+    pub.topic = (byte*) topicName;
+    pub.payload = &tmp[0];
+    return publish(pub);
+  }
+
+  return -1;  
 }
 
 bool P2PMQTT::checkTopic(byte* buffer, int type, char* topic) {
@@ -211,10 +253,10 @@ int P2PMQTT::getType(byte* buffer) {
   int length = 0; int totalLength = 0; int msb = 0; int lsb = 0; int valUsb = 0;
   int index = 0; int aux = 0;
   volatile int firstByte = 0; // the first byte seems to break otherwise
-  // if (usb.isConnected()) { 
+  // if (btSerial.isected()) { 
 
-    if(usb.available() > 0) {
-      valUsb = usb.read();
+    if(btSerial.available() > 0) {
+      valUsb = btSerial.read();
       firstByte = valUsb;
       int firstByteMSB = valUsb >> 4 & 0x0F;
       if(debug) { 
@@ -230,8 +272,8 @@ int P2PMQTT::getType(byte* buffer) {
           pingreq.fixedHeader = firstByte;
 
           // FIXED HEADER: Length
-          while(usb.available() <= 0) {};
-          totalLength = usb.read();
+          while(btSerial.available() <= 0) {};
+          totalLength = btSerial.read();
           pingreq.length = totalLength;
 
           // VARIABLE HEADER: NONE!
@@ -264,47 +306,47 @@ int P2PMQTT::getType(byte* buffer) {
           connect.fixedHeader = firstByte;
 
           // FIXED HEADER: Length
-          while(usb.available() <= 0) {};
-          totalLength = usb.read();
+          while(btSerial.available() <= 0) {};
+          totalLength = btSerial.read();
           connect.length = totalLength;
 
           // VARIABLE HEADER: protocol length
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           length = msb*256 + lsb;
           connect.lengthProtocolNameMSB = msb;
           connect.lengthProtocolNameLSB = lsb;
 
           // VARIABLE HEADER: protocol name
-          while(usb.available() < length) {};
+          while(btSerial.available() < length) {};
           byte protocolName[length];
           while(length) {
-            valUsb = usb.read(); 
+            valUsb = btSerial.read(); 
             protocolName[sizeof(protocolName)-length] = (char) valUsb; 
             length--;
           }
           connect.protocolName = protocolName;
 
           // VARIABLE HEADER: protocol version
-          while(usb.available() <= 0) {};
-          valUsb = usb.read();
+          while(btSerial.available() <= 0) {};
+          valUsb = btSerial.read();
           connect.protocolVersion = valUsb;
 
           // VARIABLE HEADER: connect flags
-          while(usb.available() <= 0) {};
-          valUsb = usb.read();
+          while(btSerial.available() <= 0) {};
+          valUsb = btSerial.read();
           connect.connectFlags = valUsb;
 
           // VARIABLE HEADER: keep alive time
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           length = msb*256 + lsb;
           connect.keepAliveMSB = msb;
           connect.keepAliveLSB = lsb;
 
           // VARIABLE HEADER: length client ID
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           length = msb*256 + lsb;
           connect.clientIdMSB = msb;
           connect.clientIdLSB = lsb;
@@ -312,7 +354,7 @@ int P2PMQTT::getType(byte* buffer) {
           // VARIABLE HEADER: client ID
           byte clientId[length];
           while(length) {
-            valUsb = usb.read(); 
+            valUsb = btSerial.read(); 
             clientId[sizeof(clientId)-length] = (char) valUsb; 
             length--;
           }
@@ -368,22 +410,22 @@ int P2PMQTT::getType(byte* buffer) {
           publish.fixedHeader = firstByte;
 
           // FIXED HEADER: Length
-          while(usb.available() <= 0) {};
-          totalLength = usb.read();
+          while(btSerial.available() <= 0) {};
+          totalLength = btSerial.read();
           publish.length = totalLength;
 
           // VARIABLE HEADER: topic length
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           length = msb*256 + lsb;
           publish.lengthTopicMSB = msb;
           publish.lengthTopicLSB = lsb;
 
           // VARIABLE HEADER: topic name
-          while(usb.available() < length) {};
+          while(btSerial.available() < length) {};
           byte topic[length];
           while(length) {
-            valUsb = usb.read(); 
+            valUsb = btSerial.read(); 
             topic[sizeof(topic)-length] = (char) valUsb; 
             length--;
           }
@@ -393,7 +435,7 @@ int P2PMQTT::getType(byte* buffer) {
           length = publish.length - publish.lengthTopicMSB*256 - publish.lengthTopicLSB - 2;
           byte payload[length];
           while(length) {
-            valUsb = usb.read(); 
+            valUsb = btSerial.read(); 
             payload[sizeof(payload)-length] = (char) valUsb; 
             length--;
           }
@@ -441,13 +483,13 @@ int P2PMQTT::getType(byte* buffer) {
           subscribe.fixedHeader = firstByte;
 
           // FIXED HEADER: Length
-          while(usb.available() <= 0) {};
-          totalLength = usb.read();
+          while(btSerial.available() <= 0) {};
+          totalLength = btSerial.read();
           subscribe.length = totalLength;
 
           // VARIABLE HEADER: message ID
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           subscribe.msgIdMSB = msb;
           subscribe.msgIdLSB = lsb;
 
@@ -456,25 +498,25 @@ int P2PMQTT::getType(byte* buffer) {
           // implementing a single topic subscription system
           // what remains is the topic legnth, the name and the QoS
           // VARIABLE HEADER: topic length
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           length = msb*256 + lsb;
           subscribe.lengthTopicMSB = msb;
           subscribe.lengthTopicLSB = lsb;
 
           // VARIABLE HEADER: topic name
-          while(usb.available() < length) {};
+          while(btSerial.available() < length) {};
           byte topic_s[length];
           while(length) {
-            valUsb = usb.read(); 
+            valUsb = btSerial.read(); 
             topic_s[sizeof(topic_s)-length] = (char) valUsb; 
             length--;
           }
           subscribe.topic = topic_s;
 
           // VARIABLE HEADER: QoS
-          while(usb.available() <= 0) {};
-          subscribe.topicQoS = usb.read();
+          while(btSerial.available() <= 0) {};
+          subscribe.topicQoS = btSerial.read();
 
           // if debugging, print things to the Serial port in a nice way
           if(debug) {
@@ -519,13 +561,13 @@ int P2PMQTT::getType(byte* buffer) {
           unsubscribe.fixedHeader = firstByte;
 
           // FIXED HEADER: Length
-          while(usb.available() <= 0) {};
-          totalLength = usb.read();
+          while(btSerial.available() <= 0) {};
+          totalLength = btSerial.read();
           unsubscribe.length = totalLength;
 
           // VARIABLE HEADER: message ID
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           unsubscribe.msgIdMSB = msb;
           unsubscribe.msgIdLSB = lsb;
 
@@ -534,17 +576,17 @@ int P2PMQTT::getType(byte* buffer) {
           // implementing a single topic subscription system
           // what remains is the topic legnth, the name and the QoS
           // VARIABLE HEADER: topic length
-          while(usb.available() < 2) {};
-          msb = usb.read(); lsb = usb.read(); 
+          while(btSerial.available() < 2) {};
+          msb = btSerial.read(); lsb = btSerial.read(); 
           length = msb*256 + lsb;
           unsubscribe.lengthTopicMSB = msb;
           unsubscribe.lengthTopicLSB = lsb;
 
           // VARIABLE HEADER: topic name
-          while(usb.available() < length) {};
+          while(btSerial.available() < length) {};
           byte topic_us[length];
           while(length) {
-            valUsb = usb.read(); 
+            valUsb = btSerial.read(); 
             topic_us[sizeof(topic_us)-length] = (char) valUsb; 
             length--;
           }
@@ -605,7 +647,7 @@ bool P2PMQTT::cmpStr(byte* str1, char* str2, int length) {
 byte* P2PMQTT::getTopicUSB(int length) {
   byte topic[length];
   while(length) {
-    int valUsb = usb.read(); 
+    int valUsb = btSerial.read(); 
     topic[sizeof(topic)-length] = (char) valUsb; 
     length--;
   }
@@ -681,7 +723,7 @@ msg[10] = mqtt.payload[0];
 msg[11] = mqtt.payload[1];
 msg[12] = mqtt.payload[2];
 msg[13] = mqtt.payload[3];
-usb.write(msg, 14);
+btSerial.write(msg, 14);
 for (int i= 0; i<14; i++){ Serial.print(msg[i], DEC); Serial.print("\t"); }
 Serial.println();
 */
